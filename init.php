@@ -3,17 +3,23 @@ class Elfeed_Sync extends Plugin {
 	private $host;
 
 	function about() {
-		return array(1.0, "Elfeed Sync", "Sync API for elfeed", false, "http://example.com");
+		return array(null, "Elfeed Sync", "Sync API for elfeed", true);
 	}
 
 	function api_version() {
-		return 1;
-	}
-	function init($host) {
-		$this->host = $host;
+		return 2;
 	}
 
-	function testMethod() {
+	function init($host) {
+		$this->host = $host;
+
+		$this->host->add_api_method("kek", $this);
+	}
+
+	/**
+	 * Our own API.
+	 */
+	function kek() {
 		return array(API::STATUS_OK, array("ok" => true));
 	}
 }
