@@ -82,14 +82,26 @@ class Elfeed_Sync extends Plugin {
 		$results = array();
 		foreach($feeds as $feed_datum) {
 			$cat_id = $cat_ids[$feed_datum["cat"]];
-			$rc = Feeds::_subscribe($feed_datum["url"], $cat_id);
-			if ($rc["code"] === 0 || $rc["code"] === 1) {
-				$feed = ORM::for_table('ttrss_feeds')
-					->where('id', $rc["feed_id"])
-					->where('owner_uid', $_SESSION['uid'])
-					->find_one();
+			$feed = ORM::for_table('ttrss_feeds')
+				  ->where('feed_url', $feed_datum["url"])
+				  ->where('owner_uid', $_SESSION['uid'])
+				  ->find_one();
+			if (!$feed) {
+				$rc = Feeds::_subscribe($feed_datum["url"], $cat_id);
+				if ($rc["code"] === 0 || $rc["code"] === 1) {
+			        $feed = ORM::for_table('ttrss_feeds')
+			        	  ->where('id', $rc['feed_id'])
+			        	  ->where('owner_uid', $_SESSION['uid'])
+			        	  ->find_one();
+				}
+			}
+			if ($feed) {
+				if (array_key_exists('title', $feed_datum)) {
+					$feed->set([
+						'title' => $feed_datum['title'],
+					]);
+				}
 				$feed->set([
-					'title' => $feed_datum['title'],
 					'cat_id' => $cat_id
 				]);
 				$feed->save();
