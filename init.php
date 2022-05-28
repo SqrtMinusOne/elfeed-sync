@@ -16,6 +16,7 @@ class Elfeed_Sync extends Plugin {
 		$this->host->add_api_method("setFeedsTree", $this);
 		$this->host->add_api_method("getSyncEntries", $this);
 		$this->host->add_api_method("toggleEntries", $this);
+		$this->host->add_api_method("readOldEntries", $this);
 	}
 
 	function createCategoriesTree($tree, $feed_categories = null, $current_cat = null) {
@@ -186,6 +187,19 @@ class Elfeed_Sync extends Plugin {
 		}
 		ORM::get_db()->commit();
 
+		return array(API::STATUS_OK, array());
+	}
+
+	function readOldEntries() {
+		$data = $_REQUEST["data"];
+		$date = date('Y-m-d H:i:s', time() - $data['look_back']);
+		$query=<<<EOD
+UPDATE ttrss_user_entries t
+SET unread = false
+FROM ttrss_entries e
+WHERE t.owner_uid = ? AND e.updated < ? AND t.ref_id = e.id
+EOD;
+		ORM::raw_execute($query, array($_SESSION['uid'], $date));
 		return array(API::STATUS_OK, array());
 	}
 }

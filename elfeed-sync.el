@@ -78,6 +78,9 @@
 (defvar elfeed-sync--elfeed-missed nil
   "List of elfeed entries missed in tt-rss.")
 
+(defvar elfeed-sync--tt-rss-missed nil
+  "List of tt-rss entries missed in elfeed.")
+
 (cl-defstruct (elfeed-sync-datum (:constructor elfeed-sync-datum--create))
   id tags)
 
@@ -272,10 +275,10 @@ called only after a succesful login query."
 STATUS is a boolean.  If nil, the entry is marked as read. ENTRY
 is an instance of `elfeed-entry'."
   (let ((is-unread (elfeed-sync--entry-unread-p entry)))
-    (if (and is-unread status)
-        (elfeed-untag entry elfeed-sync-unread-tag)
-      (when (not is-unread)
-        (elfeed-tag entry elfeed-sync-unread-tag)))))
+    (when (and is-unread (not status))
+      (elfeed-untag entry elfeed-sync-unread-tag))
+    (when (and (not is-unread) status)
+      (elfeed-tag entry elfeed-sync-unread-tag))))
 
 (defun elfeed-sync--set-entry-marked (entry status)
   "Set the marked status of ENTRY to STATUS.
@@ -283,10 +286,10 @@ is an instance of `elfeed-entry'."
 STATUS is a boolean.  If nil, the entry is marked as
 unmarked.  ENTRY is an instance of `elfeed-entry'."
   (let ((is-marked (elfeed-sync--entry-marked-p entry)))
-    (if (and is-marked status)
-        (elfeed-untag entry elfeed-sync-marked-tag)
-      (when (not is-marked)
-        (elfeed-tag entry elfeed-sync-marked-tag)))))
+    (when (and is-marked (not status))
+      (elfeed-untag entry elfeed-sync-marked-tag))
+    (when (and (not is-marked) status)
+      (elfeed-tag entry elfeed-sync-marked-tag))))
 
 (defun elfeed-sync--ttrss-key (bad-feeds ttrss-entry)
   (let ((feed-url (alist-get 'feed_url ttrss-entry)))
@@ -295,12 +298,11 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
                 (alist-get 'updated ttrss-entry))
       (alist-get 'link ttrss-entry))))
 
-(defun elfeed-sync--elfeed-key (bad-feeds elfeed-entry)
-  (let ((feed-url (elfeed-entry-feed elfeed-entry)))
-    (if (gethash feed-url bad-feeds)
-        (format "%s---%s" (elfeed-entry-title elfeed-entry)
-                (floor (elfeed-entry-date elfeed-entry)))
-      (elfeed-entry-link elfeed-entry))))
+(defun elfeed-sync--elfeed-key (bad-feeds elfeed-entry feed-url)
+  (if (gethash feed-url bad-feeds)
+      (format "%s---%s" (elfeed-entry-title elfeed-entry)
+              (floor (elfeed-entry-date elfeed-entry)))
+    (elfeed-entry-link elfeed-entry)))
 
 (defun elfeed-sync--ttrss-get-updated-time (ttrss-entry)
   (if (and (alist-get 'last_read ttrss-entry)
@@ -322,22 +324,23 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
     (alist-get :last-sync-time elfeed-sync--state)))
 
 (defun elfeed-sync--update-ttrss-missing (ttrss-entries ttrss-entries-processed)
-  (maphash (lambda (ttrss-id ttrss-entry)
-             (when-let ((ttrss-time (elfeed-sync--ttrss-get-updated-time
-                                     ttrss-entry)))
-               (if (gethash ttrss-id ttrss-entries-processed)
-                   (remhash ttrss-id (alist-get :ids-missing-tt-rss
-                                                elfeed-sync--state))
-                 (if-let ((old-val (gethash ttrss-id
-                                            (alist-get :ids-missing-tt-rss
-                                                       elfeed-sync--state)))
-                          (is-equal (= (car old-val) ttrss-time)))
-                     t ;; do nothing
-                   (puthash ttrss-id (cons ttrss-time
-                                           elfeed-sync--start-time)
-                            (alist-get :ids-missing-tt-rss
-                                       elfeed-sync--state))))))
-           ttrss-entries))
+  (let (all-missing)
+    (maphash (lambda (ttrss-id ttrss-entry)
+               (unless (gethash ttrss-id ttrss-entries-processed)
+                 (push ttrss-entry all-missing)
+                 (when-let ((ttrss-time (elfeed-sync--ttrss-get-updated-time
+                                         ttrss-entry)))
+                   (if-let ((old-val (gethash ttrss-id
+                                              (alist-get :ids-missing-tt-rss
+                                                         elfeed-sync--state)))
+                            (is-equal (= (car old-val) ttrss-time)))
+                       t ;; do nothing
+                     (puthash ttrss-id (cons ttrss-time
+                                             elfeed-sync--start-time)
+                              (alist-get :ids-missing-tt-rss
+                                         elfeed-sync--state))))))
+             ttrss-entries)
+    all-missing))
 
 (defun elfeed-sync--do-sync (entries bad-feeds)
   (let ((ttrss-entries (make-hash-table :test #'equal))
@@ -353,8 +356,9 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
                          ttrss-entry ttrss-entries))
     (with-elfeed-db-visit (entry feed)
       (cl-incf elfeed-total-entries)
-      (if-let ((ttrss-entry (gethash (elfeed-sync--elfeed-key bad-feeds entry)
-                                     ttrss-entries)))
+      (if-let ((ttrss-entry
+                (gethash (elfeed-sync--elfeed-key bad-feeds entry (elfeed-feed-url feed))
+                         ttrss-entries)))
           (let* ((is-unread (elfeed-sync--entry-unread-p entry))
                  (is-marked (elfeed-sync--entry-marked-p entry))
                  (ttrss-id (alist-get 'id ttrss-entry))
@@ -384,7 +388,8 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
                   elfeed-sync-look-back)
                (elfeed-entry-date entry))
         (elfeed-db-return)))
-    (elfeed-sync--update-ttrss-missing ttrss-entries ttrss-entries-processed)
+    (setq elfeed-sync--tt-rss-missed
+          (elfeed-sync--update-ttrss-missing ttrss-entries ttrss-entries-processed))
     (setf (alist-get :last-sync-time elfeed-sync--state)
           elfeed-sync--start-time)
     `((:ttrss-toggle-unread . ,ttrss-toggle-unread)
@@ -399,7 +404,6 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
                                   (hash-table-count ttrss-entries-processed))))))
 
 (defun elfeed-sync--process-sync-data (sync-data)
-  (setq my/test4 sync-data)
   (elfeed-log 'info "Total entries in %s:   %s"
               (propertize "elfeed" 'face 'elfeed-log-info-level-face)
               (alist-get :elfeed-total-entries sync-data))
@@ -411,7 +415,7 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
               (alist-get :elfeed-toggle-unread-count sync-data))
   (elfeed-log 'info "Toggled marked in %s:  %s"
               (propertize "elfeed" 'face 'elfeed-log-info-level-face)
-              (alist-get :elfeed-toggle-unread-count sync-data))
+              (alist-get :elfeed-toggle-marked-count sync-data))
   (elfeed-log 'info "Toggled unread in %s:  %s"
               (propertize "tt-rss" 'face 'elfeed-log-warn-level-face)
               (length (alist-get :ttrss-toggle-unread sync-data)))
@@ -432,13 +436,12 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
   (elfeed-sync--session
    (request (concat elfeed-sync-tt-rss-instance "/api/")
      :type "POST"
-     :data (setq my/test3
-                 (json-encode
-                  `(("op" . "toggleEntries")
-                    ("sid" . ,elfeed-sync--tt-rss-sid)
-                    ("data" .
-                     (("toggle_unread" . ,(alist-get :ttrss-toggle-unread sync-data))
-                      ("toggle_marked" . ,(alist-get :ttrss-toggle-marked sync-data)))))))
+     :data (json-encode
+            `(("op" . "toggleEntries")
+              ("sid" . ,elfeed-sync--tt-rss-sid)
+              ("data" .
+               (("toggle_unread" . ,(alist-get :ttrss-toggle-unread sync-data))
+                ("toggle_marked" . ,(alist-get :ttrss-toggle-marked sync-data))))))
      :headers '(("Content-Type" . "application/json"))
      :parser 'elfeed-sync--json-read-safe
      :success (elfeed-sync--handler
@@ -496,14 +499,56 @@ unmarked.  ENTRY is an instance of `elfeed-entry'."
       (force-mode-line-update))
     (run-hooks 'elfeed-search-update-hook)))
 
+(defun elfeed-sync-read-ttrss-missing ()
+  (interactive)
+  (when (y-or-n-p "This will read all the missing tt-rss entries. Are you sure? ")
+    (elfeed-sync--session
+     (request (concat elfeed-sync-tt-rss-instance "/api/")
+       :type "POST"
+       :data (json-encode
+              `(("op" . "toggleEntries")
+                ("sid" . ,elfeed-sync--tt-rss-sid)
+                ("data" .
+                 (("toggle_unread"
+                   . ,(cl-loop for ttrss-entry in elfeed-sync--tt-rss-missed
+                               if (eq t (alist-get 'unread ttrss-entry))
+                               collect (alist-get 'id ttrss-entry)))
+                  ("toggle_marked" . ())))))
+       :headers '(("Content-Type" . "application/json"))
+       :parser 'elfeed-sync--json-read-safe
+       :success (elfeed-sync--handler
+                 (message "Success!"))
+       :error
+       (cl-function (lambda (&key error-thrown &allow-other-keys)
+                      (message "Error: %S" error-thrown)))))))
+
+(defun elfeed-sync-read-ttrss-old ()
+  (interactive)
+  (when (y-or-n-p "This will read all the old tt-rss entries. Are you sure? ")
+    (elfeed-sync--session
+     (request (concat elfeed-sync-tt-rss-instance "/api/")
+       :type "POST"
+       :data (json-encode
+              `(("op" . "readOldEntries")
+                ("sid" . ,elfeed-sync--tt-rss-sid)
+                ("data" .
+                 (("look_back" . ,elfeed-sync-look-back)))))
+       :headers '(("Content-Type" . "application/json"))
+       :parser 'elfeed-sync--json-read-safe
+       :success (elfeed-sync--handler
+                 (message "Success!"))
+       :error
+       (cl-function (lambda (&key error-thrown &allow-other-keys)
+                      (message "Error: %S" error-thrown)))))))
+
 ;;;###autoload
-(define-minor-mode elfeed-sync-mode
-  "TODO"
-  :global t
-  (if elfeed-sync-mode
-      (progn
-        (add-hook 'kill-emacs-hook #'elfeed-sync-state-save-safe))
-    (remove-hook 'kill-emacs-hook #'elfeed-sync-state-save-safe)))
+  (define-minor-mode elfeed-sync-mode
+    "TODO"
+    :global t
+    (if elfeed-sync-mode
+        (progn
+          (add-hook 'kill-emacs-hook #'elfeed-sync-state-save-safe))
+      (remove-hook 'kill-emacs-hook #'elfeed-sync-state-save-safe)))
 
 
 (provide 'elfeed-sync)
