@@ -14,7 +14,8 @@ class Elfeed_Sync extends Plugin {
 		$this->host = $host;
 
 		$this->host->add_api_method("setFeedsTree", $this);
-		$this->host->add_api_method("syncElfeed", $this);
+		$this->host->add_api_method("getSyncEntries", $this);
+		$this->host->add_api_method("toggleEntries", $this);
 	}
 
 	function createCategoriesTree($tree, $feed_categories = null, $current_cat = null) {
@@ -123,123 +124,68 @@ class Elfeed_Sync extends Plugin {
 		return array(API::STATUS_OK, array('subscribed' => $subscribed));
 	}
 
-	function updateEntries($data) {
+	function getSyncEntries() {
+		$data = $_REQUEST["data"];
 		$entries_query = ORM::for_table('ttrss_entries')
-				 ->table_alias('e')
-				 ->select_many('e.id', 'e.link', 'e.title', 'e.updated',
-							   'ue.marked', 'ue.unread', 'ue.feed_id')
-				 ->join('ttrss_user_entries', ['ue.ref_id', '=', 'e.id'], 'ue')
-				 ->join('ttrss_feeds', ['f.id', '=', 'ue.feed_id'], 'f')
-				 ->where('ue.owner_uid', $_SESSION['uid']);
+					   ->table_alias('e')
+					   ->select_many('e.id', 'e.link', 'e.title', 'e.updated',
+									 'ue.marked', 'ue.unread', 'f.feed_url', 'ue.last_read', 'ue.last_marked')
+					   ->join('ttrss_user_entries', array('e.id', '=', 'ue.ref_id'), 'ue')
+					   ->join('ttrss_feeds', array('ue.feed_id', '=', 'f.id'), 'f')
+					   ->where('ue.owner_uid', $_SESSION['uid']);
 		if (!is_null($data['look_back'])) {
 			$entries_query = $entries_query->where_gte('updated', date('Y-m-d H:i:s', time() - $data['look_back']));
 		}
 		$entries = $entries_query->find_array();
 
-		$feeds = ORM::for_table('ttrss_feeds')
-			   ->select_many('id', 'feed_url')
-			   ->where('owner_uid', $_SESSION['uid'])
-			   ->find_array();
-
-		$feed_by_link = array();
-		foreach ($feeds as $feed) {
-			$feed_by_link[$feed['feed_url']] = $feed['id'];
-		}
-		$bad_feed_ids = array();
+		$bad_feed_links = array();
 		foreach($data['bad_feeds'] as $bad_feed_link) {
-			$feed_id = $feed_by_link[$bad_feed_link];
-			if ($feed_id) {
-				$bad_feed_ids[$feed_id] = true;
-			}
+			$bad_feed_links[$bad_feed_link] = true;
 		}
 
-		$entries_by_link = array();
-		$entries_by_title_date = array();
+		$result = array();
 		foreach ($entries as $entry) {
-			if ($bad_feed_ids[$entry['feed_id']]) {
-				$title_date = $entry['title'] . '---' . $entry['updated'];
-				$entries_by_title_date[$title_date] = $entry;
+			if (array_key_exists($entry['feed_url'], $bad_feed_links)) {
+				$result[] = array(
+					'id' => $entry['id'],
+					'link' => $entry['link'],
+					'title' => $entry['title'],
+					'updated' => $entry['updated'] ? strtotime($entry['updated']) : null,
+					'marked' => $entry['marked'],
+					'unread' => $entry['unread'],
+					'feed_url' => $entry['feed_url'],
+					'last_read' => $entry['last_read'] ? strtotime($entry['last_read']) : null,
+					'last_marked' => $entry['last_marked'] ? strtotime($entry['last_marked']) : null
+				);
 			} else {
-				$entries_by_link[$entry['link']] = $entry;
+				$result[] = array(
+					'id' => $entry['id'],
+					'link' => $entry['link'],
+					'marked' => $entry['marked'],
+					'unread' => $entry['unread'],
+					'feed_url' => $entry['feed_url'],
+					'last_read' => $entry['last_read'] ? strtotime($entry['last_read']) : null,
+					'last_marked' => $entry['last_marked'] ? strtotime($entry['last_marked']) : null
+				);
 			}
 		}
 
-		$missing_feeds = array();
-		$missing_entries = array();
-		$toggle_unread = array();
-		$toggle_marked = array();
-		foreach($data['changed'] as $changed_entry) {
-			$feed_id = $feed_by_link[$changed_entry['feed_url']];
-			if (!$feed_id) {
-				$missing_feeds[$changed_entry['feed_url']] = true;
-				continue;
-			}
-			$bad_feed = $bad_feed_ids[$feed_id];
-			$entry = null;
-			if ($bad_feed) {
-				$title_date = $changed_entry['title'] . '---' . $changed_entry['date'];
-				$entry = $entries_by_title_date[$title_date];
-			} else {
-				$entry = $entries_by_link[$changed_entry['url']];
-			}
-			if (!$entry) {
-				array_push($missing_entries, $changed_entry);
-				continue;
-			}
+		return array(API::STATUS_OK, array('entries' => $result));
+	}
 
-			if (!is_array($changed_entry['tags'])) {
-				continue;
-			}
-			$unread = in_array($data['unread_tag'], $changed_entry['tags']);
-			$marked = in_array($data['starred_tag'], $changed_entry['tags']);
-			if ($entry['unread'] != $unread) {
-				array_push($toggle_unread, $entry['id']);
-			}
-			if ($entry['marked'] != $marked) {
-				array_push($toggle_marked, $entry['id']);
-			}
-		}
-
+	function toggleEntries() {
+		$data = $_REQUEST["data"];
+		$toggle_unread = $data["toggle_unread"];
+		$toggle_marked = $data["toggle_marked"];
 		ORM::get_db()->beginTransaction();
-		if (count($toggle_unread) > 0) {
+		if (!is_null($toggle_unread) && count($toggle_unread) > 0) {
 			ORM::raw_execute('UPDATE ttrss_user_entries t SET unread = not t.unread WHERE ref_id IN ('.implode(',', $toggle_unread).')');
 		}
-		if (count($toggle_marked) > 0) {
+		if (!is_null($toggle_marked) && count($toggle_marked) > 0) {
 			ORM::raw_execute('UPDATE ttrss_user_entries t SET marked = not t.marked WHERE ref_id IN ('.implode(',', $toggle_marked).')');
 		}
 		ORM::get_db()->commit();
 
-		return array($missing_feeds, $missing_entries, sizeof($toggle_unread), sizeof($toggle_marked));
-	}
-
-	function getUpdatedEntries($data) {
-		if (is_null($data['last_sync'])) {
-			return [];
-		}
-		$last_sync = date('Y-m-d H:i:s', $data['last_sync']);
-		$entries = ORM::for_table('ttrss_entries')
-				 ->select_many('link', 'ttrss_entries.title', 'updated', 'feed_url', 'marked', 'unread')
-				 ->join('ttrss_user_entries', ['ttrss_entries.id', '=', 'ttrss_user_entries.ref_id'])
-				 ->join('ttrss_feeds', ['ttrss_feeds.id', '=', 'ttrss_user_entries.feed_id'])
-				 ->where_raw('ttrss_user_entries.last_read >= ? OR ttrss_user_entries.last_marked >= ?', [$last_sync, $last_sync])
-				 ->where('ttrss_user_entries.owner_uid', $_SESSION['uid'])
-				 ->find_array();
-		return $entries;
-	}
-
-	function syncElfeed() {
-		$data = $_REQUEST["data"];
-
-		list($missing_feeds, $missing_entries, $toggled_unread, $toggled_marked) = $this->updateEntries($data);
-		$changed_entries = $this->getUpdatedEntries($data);
-		return array(API::STATUS_OK,
-					 array(
-						 'missing_feeds' => $missing_feeds,
-						 'missing_entries' => $missing_entries,
-						 'toggled_unread' => $toggled_unread,
-						 'toggled_marked' => $toggled_marked,
-						 'updated' => $changed_entries
-					 )
-		);
+		return array(API::STATUS_OK, array());
 	}
 }
