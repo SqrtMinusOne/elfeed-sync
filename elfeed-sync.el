@@ -97,6 +97,13 @@ Do not add the trailing slash."
   :group 'elfeed-sync
   :type 'symbol)
 
+(defcustom elfeed-sync-override-priority nil
+  "Whether to override the priority of the entry."
+  :group 'elfeed-sync
+  :type '(choice (const :tag "Do not override" nil)
+                 (const :tag "tt-rss" 'tt-rss)
+                 (const :tag "elfeed" 'elfeed)))
+
 (defvar elfeed-sync--tt-rss-sid nil
   "Session ID.")
 
@@ -452,6 +459,18 @@ Look at `elfeed-sync--do-sync' for the details."
              ttrss-entries)
     all-missing))
 
+(defun elfeed-sync--get-priority (last-sync-time ttrss-time)
+  "Check if the tt-rss entry has a priority over the elfeed entry.
+
+TTRSS-TIME is the time when the entry was last updated.
+LAST-SYNC-TIME is the output of
+`elfeed-sync--ttrss-get-last-sync-time'."
+  (if elfeed-sync-override-priority
+      (eq elfeed-sync-override-priority 'tttrss)
+    (if (and last-sync-time ttrss-time)
+        (> ttrss-time last-sync-time)
+      (and ttrss-time t))))
+
 (defun elfeed-sync--do-sync (entries bad-feeds)
   "Sync the ENTRIES with the elfeed database.
 
@@ -523,9 +542,7 @@ log."
                  (ttrss-time (elfeed-sync--ttrss-get-updated-time ttrss-entry))
                  (last-sync-time
                   (elfeed-sync--ttrss-get-last-sync-time ttrss-id ttrss-time))
-                 (ttrss-priority (if (and last-sync-time ttrss-time)
-                                     (> ttrss-time last-sync-time)
-                                   (and ttrss-time t)))
+                 (ttrss-priority (elfeed-sync--get-priority last-sync-time ttrss-time))
                  (ttrss-is-unread (eq (alist-get 'unread ttrss-entry) t))
                  (ttrss-is-marked (eq (alist-get 'marked ttrss-entry) t)))
             (when (not (eq ttrss-is-unread is-unread))
