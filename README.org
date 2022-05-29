@@ -1,0 +1,87 @@
+#+TITLE: elfeed-sync
+
+The package syncs the read and marked status of entries between [[https://github.com/skeeto/elfeed][elfeed]] and [[https://tt-rss.org/][tt-rss]].
+
+Supports [[https://github.com/SqrtMinusOne/elfeed-summary][elfeed-summary]].
+
+* Installation
+The project consists of the tt-rss plugin and the Emacs package.
+
+If you are using the [[https://git.tt-rss.org/fox/ttrss-docker-compose.git/tree/README.md][tt-rss docker]] setup, the steps are as follows. Change them accordingly if you are not.
+1. Mount the =/var/www/html= directory from the container somewhere to the filesystem as described [[https://git.tt-rss.org/fox/ttrss-docker-compose.wiki.git/tree/Home.md#how-do-i-use-dynamic-image-for-development][here]].
+2. Put the repository to the =tt-rss/plugins.local/elfeed_sync= folder:
+   #+begin_src bash
+   cd ./html/tt-rss/plugins.local/
+   git clone https://github.com/SqrtMinusOne/elfeed-sync.git elfeed_sync
+   #+end_src
+3. Add =elfeed_sync= to the =TTRSS_PLUGINS= environment variable.
+   #+begin_src dotenv
+   TTRSS_PLUGINS=auth_internal, auth_remote, nginx_xaccel, elfeed_sync
+   #+end_src
+4. Allow larger request body sizes in nginx. Add the following to the =server= directive:
+   #+begin_src conf-space
+   client_max_body_size 10M;
+   #+end_src
+
+   For me, the sync payload is around 3M.
+
+5. Increase the read timeout in nginx. Add the following to the php location directive:
+   #+begin_src conf-space
+   fastcgi_read_timeout 600;
+   #+end_src
+
+   Syncing the entries is usually pretty fast, but the first feed sync takes a while.
+6. Then restart tt-rss. Check if the plugin appears in the Preferences > Plugins section.
+7. Enable "Allows accessing this account through the API" in the Preferences > Preferences. You also may want to disable "Purge unread articles", because elfeed doesn't do that.
+
+Install the Emacs package however you normally install packages, I prefer use-package and straight.el. Make sure to enable =elfeed-sync-mode=.
+#+begin_src emacs-lisp
+(use-package elfeed-sync
+  :straight (:host github :repo "SqrtMinusOne/elfeed-sync")
+  :after elfeed
+  :config
+  (elfeed-sync-mode))
+#+end_src
+
+Then set up the following variables:
+- =elfeed-sync-tt-rss-instance= - point that to your tt-rss instance, e.g.
+  #+begin_example
+  https://example.com/tt-rss
+  #+end_example
+  (No trailing slash)
+- =elfeed-sync-tt-rss-login=
+- =elfeed-sync-tt-rss-password=
+- =elfeed-sync-unread-tag= - elfeed tag to map the read status in tt-rss. =unread= by default.
+- =elfeed-sync-marked-tag= - elfeed tag to map to the marked status in tt-rss. =later= by default.
+
+* Usage
+** Syncing the feed list
+The first thing you probably want to do is to sync the feed list.
+
+It makes little sense to sync tt-rss feeds to elfeed, because people often use projects like [[https://github.com/remyhonig/elfeed-org][elfeed-org]]. But it's possible to sync elfeed feeds to tt-rss.
+
+The function =M-x elfeed-sync-feeds= does exactly that. If you have [[https://github.com/SqrtMinusOne/elfeed-summary][elfeed-summary]] installed and tt-rss categories enabled, the function will recreate the elfeed-summary tree in tt-rss.
+
+The first run of the function takes a while because tt-rss has to fetch the feed at the moment of the first subscription. Which is why increasing the timeout may be necessary.
+
+However, running the function multiple times until it succeeds should also work.
+** Syncing the entry list
+To sync the entry list, run =M-x elfeed-sync=. The sync usually takes a couple of seconds.
+
+The sync finishes at the "Sync complete!" message. Check the =*elfeed-log*= buffer for statistics.
+
+Occasionally, some entries do not match. Here are the possible cases:
+- Entry exists in the elfeed database, but not in tt-rss.
+  Run =M-x elfeed-sync-search-missing= to display such entries.
+- Entry exists in the tt-rss database, but not in elfeed:
+  - Entry appeared in the feed after the last =elfeed-update=.
+    Run =M-x elfeed-update= and then =M-x elfeed-sync=.
+  - Entry appeared and disappeared in the feed after the last =elfeed-update=.
+    Such an entry will never get to the elfeed database. If you want to, run =M-x elfeed-sync= and then =M-x elfeed-sync-read-ttrss-missing= to mark all such entries as read.
+- Entry appeared in the feed before =elfeed-sync-look-back=.
+  Such an entry will never be matched. This is an inconvenience if you have just set up tt-rss, it fetched old entries from the feeds and such entries remain permanently unread because they are untouched by the =M-x elfeed-sync=.
+  To mark such entries as read, run =M-x elfeed-sync-read-ttrss-old=.
+* Implementation details
+The heavy-lifting is done on the elisp side because I ran into strange performance issues with associative arrays in PHP.
+
+Check the =elfeed-sync--do-sync= function for the description of the synchronization algorithm. The tl;dr is to download all entries from tt-rss and match each entry against the elfeed database. In the case of discrepancy update whichever entry has the lower priority.
