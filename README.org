@@ -51,8 +51,8 @@ Then set up the following variables:
   (No trailing slash)
 - =elfeed-sync-tt-rss-login=
 - =elfeed-sync-tt-rss-password=
-- =elfeed-sync-unread-tag= - elfeed tag to map the read status in tt-rss. =unread= by default.
-- =elfeed-sync-marked-tag= - elfeed tag to map to the marked status in tt-rss. =later= by default.
+- =elfeed-sync-unread-tag= - elfeed tag to map to read status in tt-rss. =unread= by default.
+- =elfeed-sync-marked-tag= - elfeed tag to map to marked status in tt-rss. =later= by default.
 
 * Usage
 ** Syncing the feed list
