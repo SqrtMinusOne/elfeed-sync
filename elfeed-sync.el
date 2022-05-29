@@ -431,23 +431,24 @@ It has to be put to the `:ids-missing-tt-rss' value in the
 
 Look at `elfeed-sync--do-sync' for the details."
   (let (all-missing)
-    (maphash (lambda (ttrss-id ttrss-entry)
-               (unless (gethash ttrss-id ttrss-entries-processed)
-                 (push ttrss-entry all-missing)
-                 (when-let ((ttrss-time (elfeed-sync--ttrss-get-updated-time
-                                         ttrss-entry)))
-                   (if-let ((old-val (gethash ttrss-id
-                                              (alist-get :ids-missing-tt-rss
-                                                         elfeed-sync--state)))
-                            (is-equal (= (car old-val) ttrss-time)))
-                       t ;; do nothing
-                     (puthash ttrss-id (cons ttrss-time
-                                             (or
-                                              (alist-get :last-sync-time
-                                                         elfeed-sync--state)
-                                              elfeed-sync--start-time))
-                              (alist-get :ids-missing-tt-rss
-                                         elfeed-sync--state))))))
+    (maphash (lambda (_key ttrss-entry)
+               (let ((ttrss-id (alist-get 'id ttrss-entry)))
+                 (unless (gethash ttrss-id ttrss-entries-processed)
+                   (push ttrss-entry all-missing)
+                   (when-let ((ttrss-time (elfeed-sync--ttrss-get-updated-time
+                                           ttrss-entry)))
+                     (if-let ((old-val (gethash ttrss-id
+                                                (alist-get :ids-missing-tt-rss
+                                                           elfeed-sync--state)))
+                              (is-equal (= (car old-val) ttrss-time)))
+                         t ;; do nothing
+                       (puthash ttrss-id (cons ttrss-time
+                                               (or
+                                                (alist-get :last-sync-time
+                                                           elfeed-sync--state)
+                                                elfeed-sync--start-time))
+                                (alist-get :ids-missing-tt-rss
+                                           elfeed-sync--state)))))))
              ttrss-entries)
     all-missing))
 
@@ -754,7 +755,7 @@ FUN and ARGS are passed to `apply'."
   (let ((header (apply fun args))
         (last-sync-time (alist-get :last-sync-time elfeed-sync--state)))
     (if last-sync-time
-        (format "%s %s, Synced at"
+        (format "%s, Synced at %s"
                 header
                 (format-time-string
                  "%Y-%m-%d %H:%M:%S"
