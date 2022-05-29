@@ -184,6 +184,28 @@ with exceptions."
       (insert-buffer-substring (current-buffer))
       (error "Error reading JSON: %s" (buffer-string)))))
 
+(defmacro elfeed-sync--handler (&rest body)
+  "Default response handler for tt-rss.
+
+tt-rss often returns a non-zero status key in the response
+object instead of an HTTP code.  The handler checks for this.
+
+Also handles the case where the session ID is invalid, and
+resets it.
+
+Execute BODY with the data variable scoped."
+  `(cl-function
+    (lambda (&key data &allow-other-keys)
+      (if (= (alist-get 'status data) 0)
+          (progn
+            ,@body)
+        (message "Error!: %S" (alist-get 'content data))
+        (when (string-equal
+               "NOT_LOGGED_IN"
+               (alist-get 'error (alist-get 'content data)))
+          (message "Login error. Try again")
+          (setq elfeed-sync--tt-rss-sid nil))))))
+
 (defun elfeed-sync--with-session (callback)
   "Run CALLBACK with the active tt-rss session.
 
@@ -254,28 +276,6 @@ DATA is the output of `elfeed-summary--get-data'."
   (if (fboundp #'elfeed-summary--get-data)
       (elfeed-sync--get-tree-summary)
     (elfeed-sync--get-tree-plain)))
-
-(defmacro elfeed-sync--handler (&rest body)
-  "Default response handler for tt-rss.
-
-tt-rss often returns a non-zero status key in the response
-object instead of an HTTP code.  The handler checks for this.
-
-Also handles the case where the session ID is invalid, and
-resets it.
-
-Execute BODY with the data variable scoped."
-  `(cl-function
-    (lambda (&key data &allow-other-keys)
-      (if (= (alist-get 'status data) 0)
-          (progn
-            ,@body)
-        (message "Error!: %S" (alist-get 'content data))
-        (when (string-equal
-               "NOT_LOGGED_IN"
-               (alist-get 'error (alist-get 'content data)))
-          (message "Login error. Try again")
-          (setq elfeed-sync--tt-rss-sid nil))))))
 
 (defun elfeed-sync-feeds ()
   "Sync feeds with tt-rss.
@@ -412,7 +412,7 @@ this is necessary."
                       (alist-get :ids-missing-tt-rss
                                  elfeed-sync--state)))
                 (time-equal (= (car val) ttrss-time)))
-          (cdr var)
+          (cdr val)
         (alist-get :last-sync-time elfeed-sync--state))
     (alist-get :last-sync-time elfeed-sync--state)))
 
