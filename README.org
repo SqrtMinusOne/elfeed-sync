@@ -1,8 +1,8 @@
 #+TITLE: elfeed-sync
 
-The package syncs the read and marked status of entries between [[https://github.com/skeeto/elfeed][elfeed]] and [[https://tt-rss.org/][tt-rss]].
+Sync read/marked status of entries between [[https://github.com/skeeto/elfeed][elfeed]] and [[https://tt-rss.org/][tt-rss]]. Supports [[https://github.com/SqrtMinusOne/elfeed-summary][elfeed-summary]].
 
-Supports [[https://github.com/SqrtMinusOne/elfeed-summary][elfeed-summary]].
+DISCLAIMER: It's still an alpha version of the package, so you may want to backup your elfeed index and tt-rss database.
 
 * Installation
 The project consists of the tt-rss plugin and the Emacs package.
