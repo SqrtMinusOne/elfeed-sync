@@ -58,6 +58,9 @@
 (require 'elfeed-db)
 (require 'request)
 
+;; XXX Optional dependency on `elfeed-summary'
+(declare-function elfeed-summary--get-data "elfeed-summary")
+
 (defgroup elfeed-sync ()
   "Sync elfeed with tt-rss."
   :group 'elfeed)
@@ -170,7 +173,7 @@ This is an alist with the following keys:
 This can be put to `kill-emacs-hook' and not screw up anything
 with exceptions."
   (ignore-errors
-    (org-journal-tags-db-save)))
+    (elfeed-sync-state-save)))
 
 (defun elfeed-sync--json-read-safe ()
   "Read JSON from the current buffer, ignoring errors."
@@ -325,11 +328,11 @@ Return a hash table with the feed URL as the key."
 
 (defun elfeed-sync--entry-unread-p (entry)
   "Return t if ENTRY is unread."
-  (not (null (member elfeed-sync-unread-tag (elfeed-entry-tags entry)))))
+  (and (member elfeed-sync-unread-tag (elfeed-entry-tags entry)) t))
 
 (defun elfeed-sync--entry-marked-p (entry)
   "Return t if ENTRY is marked."
-  (not (null (member elfeed-sync-marked-tag (elfeed-entry-tags entry)))))
+  (and (member elfeed-sync-marked-tag (elfeed-entry-tags entry)) t))
 
 (defun elfeed-sync--set-entry-unread (entry status)
   "Set the unread status of ENTRY to STATUS.
@@ -408,7 +411,7 @@ this is necessary."
                       ttrss-id
                       (alist-get :ids-missing-tt-rss
                                  elfeed-sync--state)))
-                (time-equal (= (car var) ttrss-time)))
+                (time-equal (= (car val) ttrss-time)))
           (cdr var)
         (alist-get :last-sync-time elfeed-sync--state))
     (alist-get :last-sync-time elfeed-sync--state)))
@@ -521,7 +524,7 @@ log."
                   (elfeed-sync--ttrss-get-last-sync-time ttrss-id ttrss-time))
                  (ttrss-priority (if (and last-sync-time ttrss-time)
                                      (> ttrss-time last-sync-time)
-                                   (not (null ttrss-time))))
+                                   (and ttrss-time t)))
                  (ttrss-is-unread (eq (alist-get 'unread ttrss-entry) t))
                  (ttrss-is-marked (eq (alist-get 'marked ttrss-entry) t)))
             (when (not (eq ttrss-is-unread is-unread))
@@ -751,7 +754,7 @@ FUN and ARGS are passed to `apply'."
   (let ((header (apply fun args))
         (last-sync-time (alist-get :last-sync-time elfeed-sync--state)))
     (if last-sync-time
-        (format "%s, Synced at"
+        (format "%s %s, Synced at"
                 header
                 (format-time-string
                  "%Y-%m-%d %H:%M:%S"
