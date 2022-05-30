@@ -180,10 +180,10 @@ class Elfeed_Sync extends Plugin {
 		$toggle_marked = $data["toggle_marked"];
 		ORM::get_db()->beginTransaction();
 		if (!is_null($toggle_unread) && count($toggle_unread) > 0) {
-			ORM::raw_execute('UPDATE ttrss_user_entries t SET unread = not t.unread WHERE ref_id IN ('.implode(',', $toggle_unread).')');
+			ORM::raw_execute('UPDATE ttrss_user_entries t SET unread = not t.unread, last_read = NOW() WHERE ref_id IN ('.implode(',', $toggle_unread).')');
 		}
 		if (!is_null($toggle_marked) && count($toggle_marked) > 0) {
-			ORM::raw_execute('UPDATE ttrss_user_entries t SET marked = not t.marked WHERE ref_id IN ('.implode(',', $toggle_marked).')');
+			ORM::raw_execute('UPDATE ttrss_user_entries t SET marked = not t.marked, last_marked = NOW() WHERE ref_id IN ('.implode(',', $toggle_marked).')');
 		}
 		ORM::get_db()->commit();
 
