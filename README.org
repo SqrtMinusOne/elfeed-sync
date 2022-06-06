@@ -4,6 +4,8 @@ Sync read/marked status of entries between [[https://github.com/skeeto/elfeed][e
 
 DISCLAIMER: It's still an alpha version of the package, so you may want to backup your elfeed index and tt-rss database.
 
+[[./img/screenshot.png]]
+
 * Installation
 The project consists of the tt-rss plugin and the Emacs package.
 
